@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ziiom Video Editor</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">Z</span><div><strong>Ziiom Video Editor</strong><small id="projectStatus">Proyecto sin guardar</small></div></div>
+      <div class="top-actions">
+        <button id="openProjectBtn" class="ghost">Abrir</button>
+        <button id="saveProjectBtn" class="ghost">Guardar</button>
+        <button id="undoBtn" class="icon-btn" title="Deshacer">↶</button>
+        <button id="redoBtn" class="icon-btn" title="Rehacer">↷</button>
+        <button id="exportBtn" class="primary">Exportar MP4</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="sidebar">
+        <nav class="tabs">
+          <button class="tab active" data-tab="media">Multimedia</button>
+          <button class="tab" data-tab="text">Texto</button>
+          <button class="tab" data-tab="effects">Ajustes</button>
+        </nav>
+        <section id="mediaPanel" class="panel active-panel">
+          <button id="importBtn" class="import-btn">＋ Importar archivos</button>
+          <p class="hint">Video, audio e imágenes</p>
+          <div id="mediaGrid" class="media-grid"></div>
+        </section>
+        <section id="textPanel" class="panel">
+          <label>Texto</label>
+          <textarea id="textInput" placeholder="Escribe un título..."></textarea>
+          <div class="field-row"><label>Tamaño</label><input id="textSize" type="range" min="16" max="96" value="42"></div>
+          <div class="field-row"><label>Color</label><input id="textColor" type="color" value="#ffffff"></div>
+          <button id="addTextBtn" class="secondary wide">Agregar texto</button>
+        </section>
+        <section id="effectsPanel" class="panel">
+          <p class="hint">Selecciona un clip para ajustar sus propiedades.</p>
+        </section>
+      </aside>
+
+      <section class="stage-area">
+        <div class="canvas-shell" id="dropZone">
+          <div class="canvas" id="canvas">
+            <video id="preview" playsinline></video>
+            <img id="imagePreview" alt="" />
+            <div id="textLayer"></div>
+            <div id="emptyPreview" class="empty-preview"><strong>Importa un video para comenzar</strong><span>También puedes arrastrarlo a la línea de tiempo</span></div>
+          </div>
+        </div>
+        <div class="transport">
+          <button id="prevBtn" class="icon-btn">◀</button>
+          <button id="playBtn" class="play-btn">▶</button>
+          <button id="nextBtn" class="icon-btn">▶▶</button>
+          <span id="timeLabel" class="time">00:00.00 / 00:00.00</span>
+          <input id="scrubber" type="range" min="0" max="1000" value="0" />
+          <select id="previewSpeed"><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option></select>
+        </div>
+      </section>
+
+      <aside class="inspector">
+        <div class="inspector-title">Propiedades</div>
+        <div id="noSelection" class="empty-inspector">Selecciona un clip</div>
+        <div id="clipInspector" class="inspector-body hidden">
+          <div class="file-name" id="selectedName"></div>
+          <label>Inicio <input id="trimStart" type="number" min="0" step="0.1" value="0"></label>
+          <label>Final <input id="trimEnd" type="number" min="0" step="0.1" value="0"></label>
+          <label>Velocidad <select id="speed"><option>.25</option><option>.5</option><option selected>1</option><option>1.5</option><option>2</option><option>4</option></select></label>
+          <label>Volumen <input id="volume" type="range" min="0" max="2" value="1" step="0.05"></label>
+          <label>Escala <input id="scale" type="range" min="0.25" max="2" value="1" step="0.05"></label>
+          <label>Rotación <select id="rotation"><option>0</option><option>90</option><option>180</option><option>270</option></select></label>
+          <label>Opacidad <input id="opacity" type="range" min="0" max="1" value="1" step="0.05"></label>
+          <div class="row-buttons">
+            <button id="splitBtn" class="secondary">Dividir</button>
+            <button id="duplicateBtn" class="secondary">Duplicar</button>
+          </div>
+          <button id="deleteBtn" class="danger wide">Eliminar clip</button>
+        </div>
+      </aside>
+    </main>
+
+    <section class="timeline-wrap">
+      <div class="timeline-toolbar">
+        <button id="addVideoTrack" class="ghost small">＋ Video</button>
+        <button id="addAudioTrack" class="ghost small">＋ Audio</button>
+        <span></span>
+        <button id="zoomOut" class="icon-btn">−</button><span id="zoomLabel">100%</span><button id="zoomIn" class="icon-btn">＋</button>
+      </div>
+      <div class="timeline" id="timeline">
+        <div class="track"><div class="track-label"><strong>V1</strong><span>Video</span></div><div class="track-lane" id="videoTrack"></div></div>
+        <div class="track"><div class="track-label"><strong>A1</strong><span>Audio</span></div><div class="track-lane audio-lane" id="audioTrack"></div></div>
+      </div>
+    </section>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="renderer.js"></script>
+</body>
+</html>
