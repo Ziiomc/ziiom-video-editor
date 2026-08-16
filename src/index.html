@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file: data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob:; media-src 'self' file: data: blob:;" />
   <title>Ziiom Video Editor</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -13,9 +14,9 @@
       <div class="top-actions">
         <button id="openProjectBtn" class="ghost">Abrir</button>
         <button id="saveProjectBtn" class="ghost">Guardar</button>
-        <button id="undoBtn" class="icon-btn" title="Deshacer">↶</button>
-        <button id="redoBtn" class="icon-btn" title="Rehacer">↷</button>
-        <button id="exportBtn" class="primary">Exportar MP4</button>
+        <button id="undoBtn" class="icon-btn" title="Deshacer (Ctrl+Z)">↶</button>
+        <button id="redoBtn" class="icon-btn" title="Rehacer (Ctrl+Y)">↷</button>
+        <button id="exportBtn" class="primary">Exportar proyecto</button>
       </div>
     </header>
 
@@ -28,7 +29,7 @@
         </nav>
         <section id="mediaPanel" class="panel active-panel">
           <button id="importBtn" class="import-btn">＋ Importar archivos</button>
-          <p class="hint">Video, audio e imágenes</p>
+          <p class="hint">Video, audio e imágenes. Haz clic o arrastra a la línea de tiempo.</p>
           <div id="mediaGrid" class="media-grid"></div>
         </section>
         <section id="textPanel" class="panel">
@@ -37,9 +38,19 @@
           <div class="field-row"><label>Tamaño</label><input id="textSize" type="range" min="16" max="96" value="42"></div>
           <div class="field-row"><label>Color</label><input id="textColor" type="color" value="#ffffff"></div>
           <button id="addTextBtn" class="secondary wide">Agregar texto</button>
+          <p class="hint">Puedes arrastrar el texto directamente sobre el visor.</p>
         </section>
         <section id="effectsPanel" class="panel">
-          <p class="hint">Selecciona un clip para ajustar sus propiedades.</p>
+          <p class="hint">Los ajustes del clip seleccionado se reflejan en vivo.</p>
+          <button id="resetVisualBtn" class="secondary wide">Restablecer imagen</button>
+          <button id="muteBtn" class="ghost wide panel-action">Silenciar / activar audio</button>
+          <div class="shortcut-card">
+            <strong>Atajos</strong>
+            <span>Espacio: reproducir / pausar</span>
+            <span>← →: mover 1 segundo</span>
+            <span>S: dividir en el cursor</span>
+            <span>Supr: eliminar clip</span>
+          </div>
         </section>
       </aside>
 
@@ -49,16 +60,16 @@
             <video id="preview" playsinline></video>
             <img id="imagePreview" alt="" />
             <div id="textLayer"></div>
-            <div id="emptyPreview" class="empty-preview"><strong>Importa un video para comenzar</strong><span>También puedes arrastrarlo a la línea de tiempo</span></div>
+            <div id="emptyPreview" class="empty-preview"><strong>Importa un video para comenzar</strong><span>La línea de tiempo está lista para editar</span></div>
           </div>
         </div>
         <div class="transport">
-          <button id="prevBtn" class="icon-btn">◀</button>
-          <button id="playBtn" class="play-btn">▶</button>
-          <button id="nextBtn" class="icon-btn">▶▶</button>
+          <button id="prevBtn" class="icon-btn" title="Retroceder 1 segundo">◀</button>
+          <button id="playBtn" class="play-btn" title="Reproducir / pausar">▶</button>
+          <button id="nextBtn" class="icon-btn" title="Avanzar 1 segundo">▶▶</button>
           <span id="timeLabel" class="time">00:00.00 / 00:00.00</span>
-          <input id="scrubber" type="range" min="0" max="1000" value="0" />
-          <select id="previewSpeed"><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option></select>
+          <input id="scrubber" type="range" min="0" max="1000" value="0" aria-label="Posición del clip" />
+          <select id="previewSpeed" title="Velocidad de previsualización"><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option></select>
         </div>
       </section>
 
@@ -69,11 +80,11 @@
           <div class="file-name" id="selectedName"></div>
           <label>Inicio <input id="trimStart" type="number" min="0" step="0.1" value="0"></label>
           <label>Final <input id="trimEnd" type="number" min="0" step="0.1" value="0"></label>
-          <label>Velocidad <select id="speed"><option>.25</option><option>.5</option><option selected>1</option><option>1.5</option><option>2</option><option>4</option></select></label>
-          <label>Volumen <input id="volume" type="range" min="0" max="2" value="1" step="0.05"></label>
-          <label>Escala <input id="scale" type="range" min="0.25" max="2" value="1" step="0.05"></label>
-          <label>Rotación <select id="rotation"><option>0</option><option>90</option><option>180</option><option>270</option></select></label>
-          <label>Opacidad <input id="opacity" type="range" min="0" max="1" value="1" step="0.05"></label>
+          <label>Velocidad <select id="speed"><option value="0.25">0.25x</option><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option><option value="4">4x</option></select></label>
+          <label>Volumen <span class="control-value" id="volumeValue">100%</span><input id="volume" type="range" min="0" max="1" value="1" step="0.01"></label>
+          <label>Escala <span class="control-value" id="scaleValue">100%</span><input id="scale" type="range" min="0.25" max="2" value="1" step="0.01"></label>
+          <label>Rotación <select id="rotation"><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></label>
+          <label>Opacidad <span class="control-value" id="opacityValue">100%</span><input id="opacity" type="range" min="0" max="1" value="1" step="0.01"></label>
           <div class="row-buttons">
             <button id="splitBtn" class="secondary">Dividir</button>
             <button id="duplicateBtn" class="secondary">Duplicar</button>
@@ -85,12 +96,14 @@
 
     <section class="timeline-wrap">
       <div class="timeline-toolbar">
-        <button id="addVideoTrack" class="ghost small">＋ Video</button>
-        <button id="addAudioTrack" class="ghost small">＋ Audio</button>
+        <button id="importVideoBtn" class="ghost small">＋ Video</button>
+        <button id="importAudioBtn" class="ghost small">＋ Audio</button>
+        <span id="timelineTime" class="timeline-time">00:00.00</span>
         <span></span>
         <button id="zoomOut" class="icon-btn">−</button><span id="zoomLabel">100%</span><button id="zoomIn" class="icon-btn">＋</button>
       </div>
       <div class="timeline" id="timeline">
+        <div class="ruler-row"><div class="track-label ruler-label">TIEMPO</div><div class="time-ruler" id="timeRuler"></div></div>
         <div class="track"><div class="track-label"><strong>V1</strong><span>Video</span></div><div class="track-lane" id="videoTrack"></div></div>
         <div class="track"><div class="track-label"><strong>A1</strong><span>Audio</span></div><div class="track-lane audio-lane" id="audioTrack"></div></div>
       </div>

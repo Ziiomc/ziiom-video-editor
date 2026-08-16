@@ -1,7 +1,7 @@
 {
   "name": "ziiom-video-editor",
-  "version": "0.1.0",
-  "description": "Editor de video de escritorio simple y rápido",
+  "version": "0.2.0",
+  "description": "Editor de video de escritorio moderno, rápido y sencillo",
   "main": "src/main.js",
   "author": "Ziiomc",
   "license": "MIT",
