@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ZiiomVideoEditor" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">@color/ziiom_accent</item>
+        <item name="colorPrimary">@color/ziiom_accent</item>
+        <item name="colorPrimaryVariant">@color/ziiom_accent</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="android:navigationBarColor">@color/ziiom_bg</item>
+        <item name="android:statusBarColor">@color/ziiom_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

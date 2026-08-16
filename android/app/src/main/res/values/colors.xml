@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ziiom_bg">#070A10</color>
+    <color name="ziiom_panel">#0D121B</color>
+    <color name="ziiom_panel2">#111824</color>
+    <color name="ziiom_line">#202A39</color>
+    <color name="ziiom_text">#EEF4FF</color>
+    <color name="ziiom_muted">#8491A4</color>
+    <color name="ziiom_accent">#4EA1FF</color>
+    <color name="ziiom_accent2">#6ED0FF</color>
+    <color name="ziiom_danger">#FF5C70</color>
+</resources>
