@@ -10,6 +10,7 @@ import android.view.View;
 
 public class VisualizerView extends View {
     private Bitmap background;
+    private Bitmap centerImage;
     private AudioAnalysis analysis;
     private VisualizerConfig config = new VisualizerConfig();
     private long positionMs;
@@ -23,6 +24,9 @@ public class VisualizerView extends View {
     }
 
     public void setBackgroundBitmap(Bitmap bitmap) { this.background = bitmap; invalidate(); }
+    public void setCenterBitmap(Bitmap bitmap) { this.centerImage = bitmap; invalidate(); }
+    public Bitmap getBackgroundBitmap() { return background; }
+    public Bitmap getCenterBitmap() { return centerImage; }
     public void setAnalysis(AudioAnalysis analysis) { this.analysis = analysis; invalidate(); }
     public void setConfig(VisualizerConfig config) { this.config = config; invalidate(); }
     public void setPositionMs(long positionMs) { this.positionMs = positionMs; invalidate(); }
@@ -41,6 +45,7 @@ public class VisualizerView extends View {
             p.setColor(Color.rgb(15, 20, 30));
             canvas.drawRect(0, 0, getWidth(), getHeight(), p);
         }
-        VisualizerPainter.drawOverlay(canvas, analysis, config, positionMs);
+        Bitmap artwork = centerImage != null ? centerImage : background;
+        VisualizerPainter.drawOverlay(canvas, analysis, config, positionMs, artwork);
     }
 }
