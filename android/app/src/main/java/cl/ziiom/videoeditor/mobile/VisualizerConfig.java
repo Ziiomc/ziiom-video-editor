@@ -1,12 +1,13 @@
 package cl.ziiom.videoeditor.mobile;
 
 public class VisualizerConfig {
-    public enum Mode { BARS, CIRCLE, WAVE, MIRROR, PARTICLES }
+    public enum Mode { TRIANGLE, CIRCLE, DIAMOND, RING, BARS, WAVE, MIRROR, PARTICLES }
 
-    public Mode mode = Mode.BARS;
+    public Mode mode = Mode.TRIANGLE;
     public float sensitivity = 1.35f;
     public float darkness = 0.72f;
     public float zoom = 0.85f;
+    public float centerSize = 0.58f;
     public boolean glow = true;
 
     public VisualizerConfig copy() {
@@ -15,6 +16,7 @@ public class VisualizerConfig {
         c.sensitivity = sensitivity;
         c.darkness = darkness;
         c.zoom = zoom;
+        c.centerSize = centerSize;
         c.glow = glow;
         return c;
     }
