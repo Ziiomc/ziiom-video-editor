@@ -39,12 +39,12 @@ jobs:
         run: gradle :app:assembleDebug --stacktrace
 
       - name: Rename APK
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk "Pulse-Canvas-Visualizer-v1.1.apk"
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk "Pulse-Canvas-Visualizer-v1.2.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Pulse-Canvas-Visualizer-APK
-          path: Pulse-Canvas-Visualizer-v1.1.apk
+          path: Pulse-Canvas-Visualizer-v1.2.apk
           if-no-files-found: error
           retention-days: 90
