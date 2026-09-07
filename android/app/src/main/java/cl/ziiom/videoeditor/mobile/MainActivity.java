@@ -4,7 +4,10 @@ import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.database.Cursor;
-import android.media.MediaMetadataRetriever;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
+import android.graphics.Matrix;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -13,11 +16,14 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -27,18 +33,16 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.content.FileProvider;
-import androidx.media3.common.C;
 import androidx.media3.common.Effect;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.Player;
 import androidx.media3.common.audio.AudioProcessor;
-import androidx.media3.common.audio.DefaultGainProvider;
-import androidx.media3.common.audio.GainProcessor;
-import androidx.media3.common.audio.SpeedProvider;
 import androidx.media3.common.util.UnstableApi;
-import androidx.media3.effect.ScaleAndRotateTransformation;
+import androidx.media3.effect.MatrixTransformation;
+import androidx.media3.effect.OverlayEffect;
+import androidx.media3.effect.Presentation;
+import androidx.media3.effect.TextureOverlay;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.transformer.Composition;
 import androidx.media3.transformer.EditedMediaItem;
@@ -48,7 +52,6 @@ import androidx.media3.transformer.ExportException;
 import androidx.media3.transformer.ExportResult;
 import androidx.media3.transformer.ProgressHolder;
 import androidx.media3.transformer.Transformer;
-import androidx.media3.ui.PlayerView;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -60,534 +63,270 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @UnstableApi
 public class MainActivity extends AppCompatActivity {
+    private final int BG = Color.rgb(7,10,16);
+    private final int TEXT = Color.rgb(238,244,255);
+    private final int MUTED = Color.rgb(132,145,164);
 
-    private static class ClipModel {
-        Uri uri;
-        String name;
-        long durationMs;
-        long trimStartMs;
-        long trimEndMs;
-        float speed = 1f;
-        float volume = 1f;
-        float rotation = 0f;
+    private VisualizerView visualizerView;
+    private TextView songLabel, imageLabel, timeLabel, statusLabel, sensitivityValue, darknessValue, zoomValue;
+    private SeekBar playbackSeek, sensitivitySeek, darknessSeek, zoomSeek;
+    private Spinner modeSpinner, resolutionSpinner;
+    private CheckBox glowCheck;
+    private Button playBtn, exportBtn;
+    private ProgressBar workProgress;
 
-        ClipModel(Uri uri, String name, long durationMs) {
-            this.uri = uri;
-            this.name = name;
-            this.durationMs = Math.max(1, durationMs);
-            this.trimStartMs = 0;
-            this.trimEndMs = this.durationMs;
-        }
-    }
-
-    private PlayerView playerView;
     private ExoPlayer player;
-    private TextView emptyHint;
-    private TextView timeLabel;
-    private TextView selectedClipLabel;
-    private TextView trimStartLabel;
-    private TextView trimEndLabel;
-    private TextView audioLabel;
-    private TextView statusLabel;
-    private SeekBar playbackSeek;
-    private SeekBar trimStartSeek;
-    private SeekBar trimEndSeek;
-    private SeekBar volumeSeek;
-    private Spinner speedSpinner;
-    private Button rotateBtn;
-    private Button playBtn;
-    private Button exportBtn;
-    private LinearLayout clipStrip;
-    private ProgressBar exportProgress;
-
-    private final List<ClipModel> clips = new ArrayList<>();
-    private int selectedIndex = -1;
-    private Uri backgroundAudioUri;
-    private String backgroundAudioName;
-    private boolean userSeeking = false;
     private Transformer transformer;
-    private File lastExportedFile;
-
+    private Uri audioUri, imageUri;
+    private AudioAnalysis analysis;
+    private final VisualizerConfig config = new VisualizerConfig();
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private boolean userSeeking;
 
-    private final Runnable playbackTicker = new Runnable() {
-        @Override
-        public void run() {
-            ClipModel clip = selectedClip();
-            if (clip != null && player != null) {
-                long position = player.getCurrentPosition();
-                if (player.isPlaying() && position >= clip.trimEndMs) {
-                    player.pause();
-                    player.seekTo(clip.trimEndMs);
+    private final Runnable ticker = new Runnable() {
+        @Override public void run() {
+            if (player != null && visualizerView != null) {
+                long pos = Math.max(0, player.getCurrentPosition());
+                visualizerView.setPositionMs(pos);
+                if (!userSeeking && analysis != null && analysis.durationMs > 0) {
+                    playbackSeek.setProgress((int)Math.min(1000, pos * 1000L / analysis.durationMs));
                 }
-                if (!userSeeking) playbackSeek.setProgress(positionToProgress(position, clip.durationMs));
-                timeLabel.setText(formatTime(position) + " / " + formatTime(clip.durationMs));
+                timeLabel.setText(formatTime(pos) + " / " + formatTime(analysis == null ? 0 : analysis.durationMs));
                 playBtn.setText(player.isPlaying() ? "❚❚" : "▶");
             }
-            handler.postDelayed(this, 100);
+            handler.postDelayed(this, 33);
         }
     };
 
-    private final ActivityResultLauncher<String[]> videoPicker = registerForActivityResult(
-            new ActivityResultContracts.OpenMultipleDocuments(),
-            uris -> {
-                if (uris == null || uris.isEmpty()) return;
-                for (Uri uri : uris) {
-                    persistReadPermission(uri);
-                    if (!containsUri(uri)) clips.add(new ClipModel(uri, queryDisplayName(uri), queryDuration(uri)));
-                }
-                if (selectedIndex < 0 && !clips.isEmpty()) selectedIndex = 0;
-                renderClipStrip();
-                loadSelectedClip();
-                setStatus(clips.size() + (clips.size() == 1 ? " clip listo" : " clips listos"));
-            }
-    );
-
     private final ActivityResultLauncher<String[]> audioPicker = registerForActivityResult(
-            new ActivityResultContracts.OpenDocument(),
-            uri -> {
+            new ActivityResultContracts.OpenDocument(), uri -> {
                 if (uri == null) return;
                 persistReadPermission(uri);
-                backgroundAudioUri = uri;
-                backgroundAudioName = queryDisplayName(uri);
-                audioLabel.setText("Música: " + backgroundAudioName);
-                setStatus("Música de fondo agregada");
-            }
-    );
+                audioUri = uri;
+                songLabel.setText(queryDisplayName(uri));
+                analyzeSong(uri);
+            });
 
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    private final ActivityResultLauncher<String[]> imagePicker = registerForActivityResult(
+            new ActivityResultContracts.OpenDocument(), uri -> {
+                if (uri == null) return;
+                persistReadPermission(uri);
+                imageUri = uri;
+                imageLabel.setText(queryDisplayName(uri));
+                loadBackground(uri);
+            });
+
+    @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-        bindViews();
-        setupPlayer();
-        setupControls();
-        handler.post(playbackTicker);
-    }
-
-    private void bindViews() {
-        playerView = findViewById(R.id.playerView);
-        emptyHint = findViewById(R.id.emptyHint);
-        timeLabel = findViewById(R.id.timeLabel);
-        selectedClipLabel = findViewById(R.id.selectedClipLabel);
-        trimStartLabel = findViewById(R.id.trimStartLabel);
-        trimEndLabel = findViewById(R.id.trimEndLabel);
-        audioLabel = findViewById(R.id.audioLabel);
-        statusLabel = findViewById(R.id.statusLabel);
-        playbackSeek = findViewById(R.id.playbackSeek);
-        trimStartSeek = findViewById(R.id.trimStartSeek);
-        trimEndSeek = findViewById(R.id.trimEndSeek);
-        volumeSeek = findViewById(R.id.volumeSeek);
-        speedSpinner = findViewById(R.id.speedSpinner);
-        rotateBtn = findViewById(R.id.rotateBtn);
-        playBtn = findViewById(R.id.playBtn);
-        exportBtn = findViewById(R.id.exportBtn);
-        clipStrip = findViewById(R.id.clipStrip);
-        exportProgress = findViewById(R.id.exportProgress);
-    }
-
-    private void setupPlayer() {
+        setContentView(buildUi());
         player = new ExoPlayer.Builder(this).build();
-        playerView.setPlayer(player);
         player.addListener(new Player.Listener() {
-            @Override public void onIsPlayingChanged(boolean isPlaying) {
-                playBtn.setText(isPlaying ? "❚❚" : "▶");
+            @Override public void onPlaybackStateChanged(int state) {
+                if (state == Player.STATE_ENDED) { player.pause(); player.seekTo(0); }
             }
         });
+        setupControls();
+        visualizerView.setConfig(config);
+        handler.post(ticker);
+    }
+
+    private View buildUi() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+        LinearLayout root = vertical();
+        root.setPadding(dp(14), dp(14), dp(14), dp(28));
+        scroll.addView(root, new ScrollView.LayoutParams(-1, -2));
+
+        TextView title = text("PULSE CANVAS  ·  VISUALIZER", 22, TEXT, true);
+        root.addView(title, lp(-1, -2, 0, 0, 0, 10));
+        TextView sub = text("Canción + fondo + espectro reactivo + efectos de graves", 13, MUTED, false);
+        root.addView(sub, lp(-1, -2, 0, 0, 0, 12));
+
+        LinearLayout importRow = horizontal();
+        Button pickSongBtn = button("+ Canción"); pickSongBtn.setId(1001);
+        Button pickImageBtn = button("+ Fondo"); pickImageBtn.setId(1002);
+        importRow.addView(pickSongBtn, weightLp());
+        LinearLayout.LayoutParams second = weightLp(); second.setMarginStart(dp(8));
+        importRow.addView(pickImageBtn, second);
+        root.addView(importRow, lp(-1, -2, 0, 0, 0, 6));
+
+        songLabel = text("Sin canción", 12, MUTED, false); root.addView(songLabel);
+        imageLabel = text("Sin imagen", 12, MUTED, false); root.addView(imageLabel, lp(-1,-2,0,2,0,10));
+
+        visualizerView = new VisualizerView(this);
+        visualizerView.setBackgroundColor(Color.BLACK);
+        root.addView(visualizerView, lp(-1, dp(210), 0, 0, 0, 8));
+
+        LinearLayout transport = horizontal(); transport.setGravity(Gravity.CENTER_VERTICAL);
+        playBtn = button("▶"); playBtn.setEnabled(false);
+        timeLabel = text("00:00 / 00:00", 12, MUTED, false); timeLabel.setGravity(Gravity.END);
+        transport.addView(playBtn, new LinearLayout.LayoutParams(dp(58), dp(48)));
+        LinearLayout.LayoutParams t = weightLp(); t.setMarginStart(dp(8)); transport.addView(timeLabel, t);
+        root.addView(transport);
+        playbackSeek = new SeekBar(this); playbackSeek.setMax(1000); root.addView(playbackSeek, lp(-1,-2,0,0,0,8));
+
+        root.addView(text("Visualizador", 15, TEXT, true));
+        modeSpinner = new Spinner(this); root.addView(modeSpinner, lp(-1, dp(50),0,0,0,4));
+
+        sensitivityValue = addSliderSection(root, "Sensibilidad al audio", "1.35x");
+        sensitivitySeek = new SeekBar(this); root.addView(sensitivitySeek);
+        darknessValue = addSliderSection(root, "Oscurecimiento en bajos", "72%");
+        darknessSeek = new SeekBar(this); root.addView(darknessSeek);
+        zoomValue = addSliderSection(root, "Pulso / zoom de graves", "85%");
+        zoomSeek = new SeekBar(this); root.addView(zoomSeek);
+
+        glowCheck = new CheckBox(this); glowCheck.setText("Glow / brillo del espectro"); glowCheck.setTextColor(TEXT);
+        root.addView(glowCheck, lp(-1,-2,0,2,0,6));
+
+        root.addView(text("Formato de exportación", 15, TEXT, true));
+        resolutionSpinner = new Spinner(this); root.addView(resolutionSpinner, lp(-1, dp(50),0,0,0,6));
+        exportBtn = button("Exportar MP4"); exportBtn.setEnabled(false); root.addView(exportBtn, lp(-1,dp(56),0,4,0,8));
+        workProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        workProgress.setMax(100); workProgress.setVisibility(View.GONE); root.addView(workProgress, lp(-1,-2,0,0,0,6));
+        statusLabel = text("Selecciona una canción y un fondo", 12, MUTED, false); root.addView(statusLabel);
+
+        pickSongBtn.setOnClickListener(v -> audioPicker.launch(new String[]{"audio/*"}));
+        pickImageBtn.setOnClickListener(v -> imagePicker.launch(new String[]{"image/*"}));
+        return scroll;
+    }
+
+    private TextView addSliderSection(LinearLayout root, String label, String initial) {
+        LinearLayout row = horizontal(); row.setGravity(Gravity.CENTER_VERTICAL);
+        TextView l = text(label, 13, MUTED, false);
+        TextView v = text(initial, 13, TEXT, false); v.setGravity(Gravity.END);
+        row.addView(l, weightLp()); row.addView(v, new LinearLayout.LayoutParams(-2,-2)); root.addView(row);
+        return v;
     }
 
     private void setupControls() {
-        Button importVideoBtn = findViewById(R.id.importVideoBtn);
-        Button backBtn = findViewById(R.id.backBtn);
-        Button forwardBtn = findViewById(R.id.forwardBtn);
-        Button addAudioBtn = findViewById(R.id.addAudioBtn);
-        Button deleteBtn = findViewById(R.id.deleteBtn);
-
-        importVideoBtn.setOnClickListener(v -> videoPicker.launch(new String[]{"video/*"}));
-        addAudioBtn.setOnClickListener(v -> audioPicker.launch(new String[]{"audio/*"}));
-        exportBtn.setOnClickListener(v -> exportProject());
-
-        playBtn.setOnClickListener(v -> {
-            ClipModel clip = selectedClip();
-            if (clip == null) return;
-            if (player.isPlaying()) player.pause();
-            else {
-                long p = player.getCurrentPosition();
-                if (p < clip.trimStartMs || p >= clip.trimEndMs) player.seekTo(clip.trimStartMs);
-                player.play();
-            }
-        });
-        backBtn.setOnClickListener(v -> seekBy(-1000));
-        forwardBtn.setOnClickListener(v -> seekBy(1000));
-
+        playBtn.setOnClickListener(v -> togglePlayback());
+        exportBtn.setOnClickListener(v -> exportVideo());
         playbackSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onStartTrackingTouch(SeekBar seekBar) { userSeeking = true; }
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {
-                ClipModel clip = selectedClip();
-                if (clip != null) player.seekTo(progressToPosition(seekBar.getProgress(), clip.durationMs));
-                userSeeking = false;
-            }
-            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser) {
-                    ClipModel clip = selectedClip();
-                    if (clip != null) timeLabel.setText(formatTime(progressToPosition(progress, clip.durationMs)) + " / " + formatTime(clip.durationMs));
-                }
-            }
+            @Override public void onStartTrackingTouch(SeekBar s) { userSeeking = true; }
+            @Override public void onStopTrackingTouch(SeekBar s) { if (analysis != null) player.seekTo(s.getProgress()*analysis.durationMs/1000L); userSeeking=false; }
+            @Override public void onProgressChanged(SeekBar s,int p,boolean fromUser) { if(fromUser&&analysis!=null) visualizerView.setPositionMs(p*analysis.durationMs/1000L); }
         });
 
-        trimStartSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
-            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (!fromUser) return;
-                ClipModel clip = selectedClip();
-                if (clip == null) return;
-                long proposed = progressToPosition(progress, clip.durationMs);
-                clip.trimStartMs = Math.min(proposed, Math.max(0, clip.trimEndMs - 100));
-                trimStartLabel.setText("Inicio: " + formatTimePrecise(clip.trimStartMs));
-                player.seekTo(clip.trimStartMs);
-            }
+        String[] modes = {"Barras", "Círculo", "Onda", "Espejo", "Partículas"};
+        modeSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, modes));
+        modeSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) { config.mode=VisualizerConfig.Mode.values()[pos]; visualizerView.invalidate(); }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> p) {}
+        });
+        String[] resolutions = {"1280 × 720 · Horizontal", "720 × 1280 · Vertical"};
+        resolutionSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, resolutions));
+        resolutionSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) { resizePreview(pos==0); }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> p) {}
         });
 
-        trimEndSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
-            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (!fromUser) return;
-                ClipModel clip = selectedClip();
-                if (clip == null) return;
-                long proposed = progressToPosition(progress, clip.durationMs);
-                clip.trimEndMs = Math.max(proposed, Math.min(clip.durationMs, clip.trimStartMs + 100));
-                trimEndLabel.setText("Final: " + formatTimePrecise(clip.trimEndMs));
-                if (player.getCurrentPosition() > clip.trimEndMs) player.seekTo(clip.trimEndMs);
-            }
-        });
+        sensitivitySeek.setMax(200); sensitivitySeek.setProgress(85);
+        darknessSeek.setMax(100); darknessSeek.setProgress(72);
+        zoomSeek.setMax(100); zoomSeek.setProgress(85);
+        SeekBar.OnSeekBarChangeListener fx = new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {}
+            @Override public void onProgressChanged(SeekBar s,int p,boolean fromUser) { updateConfig(); }
+        };
+        sensitivitySeek.setOnSeekBarChangeListener(fx); darknessSeek.setOnSeekBarChangeListener(fx); zoomSeek.setOnSeekBarChangeListener(fx);
+        glowCheck.setChecked(true); glowCheck.setOnCheckedChangeListener((b,c)->{ config.glow=c; visualizerView.invalidate(); });
+        updateConfig();
+    }
 
-        String[] speeds = {"0.5x", "0.75x", "1x", "1.25x", "1.5x", "2x"};
-        ArrayAdapter<String> speedAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, speeds);
-        speedSpinner.setAdapter(speedAdapter);
-        speedSpinner.setSelection(2);
-        speedSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
-                ClipModel clip = selectedClip();
-                if (clip == null) return;
-                clip.speed = parseSpeed(speeds[position]);
-                player.setPlaybackSpeed(clip.speed);
-                renderClipStrip();
-            }
-            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
-        });
+    private void updateConfig() {
+        config.sensitivity=.5f+sensitivitySeek.getProgress()/100f;
+        config.darkness=darknessSeek.getProgress()/100f;
+        config.zoom=zoomSeek.getProgress()/100f;
+        sensitivityValue.setText(String.format(Locale.US,"%.2fx",config.sensitivity));
+        darknessValue.setText(darknessSeek.getProgress()+"%"); zoomValue.setText(zoomSeek.getProgress()+"%");
+        visualizerView.invalidate();
+    }
 
-        volumeSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
-            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                ClipModel clip = selectedClip();
-                if (clip == null) return;
-                clip.volume = progress / 100f;
-                player.setVolume(clip.volume);
-            }
-        });
+    private void resizePreview(boolean horizontal) {
+        visualizerView.getLayoutParams().height = dp(horizontal ? 210 : 390); visualizerView.requestLayout();
+    }
 
-        rotateBtn.setOnClickListener(v -> {
-            ClipModel clip = selectedClip();
-            if (clip == null) return;
-            clip.rotation = (clip.rotation + 90f) % 360f;
-            rotateBtn.setText((int) clip.rotation + "°");
-            applyPreviewRotation(clip.rotation);
-        });
+    private void togglePlayback() {
+        if (analysis==null) return;
+        if (player.isPlaying()) player.pause(); else { if(player.getCurrentPosition()>=analysis.durationMs-100)player.seekTo(0); player.play(); }
+    }
 
-        deleteBtn.setOnClickListener(v -> {
-            if (selectedIndex < 0 || selectedIndex >= clips.size()) return;
-            clips.remove(selectedIndex);
-            if (clips.isEmpty()) selectedIndex = -1;
-            else selectedIndex = Math.min(selectedIndex, clips.size() - 1);
-            renderClipStrip();
-            loadSelectedClip();
+    private void analyzeSong(Uri uri) {
+        analysis=null; visualizerView.setAnalysis(null); player.pause(); playBtn.setEnabled(false); exportBtn.setEnabled(false);
+        workProgress.setVisibility(View.VISIBLE); workProgress.setProgress(0); statusLabel.setText("Analizando frecuencias…");
+        executor.execute(() -> {
+            try {
+                AudioAnalysis result=AudioAnalyzer.analyze(this,uri,p->runOnUiThread(()->{workProgress.setProgress(p);statusLabel.setText("Analizando canción… "+p+"%");}));
+                runOnUiThread(()->{ analysis=result; visualizerView.setAnalysis(result); player.setMediaItem(MediaItem.fromUri(uri)); player.prepare(); player.seekTo(0); playBtn.setEnabled(true); workProgress.setVisibility(View.GONE); statusLabel.setText("Canción analizada. Lista para visualizar."); refreshReady(); });
+            } catch(Exception e) { runOnUiThread(()->{workProgress.setVisibility(View.GONE);statusLabel.setText("No se pudo analizar la canción");toast(e.getMessage()==null?"Audio no compatible":e.getMessage());}); }
         });
     }
 
-    private void renderClipStrip() {
-        clipStrip.removeAllViews();
-        for (int i = 0; i < clips.size(); i++) {
-            ClipModel clip = clips.get(i);
-            Button b = new Button(this);
-            b.setAllCaps(false);
-            b.setText((i + 1) + ". " + shortName(clip.name) + "\n" + formatTime(clip.trimEndMs - clip.trimStartMs) + " · " + formatSpeed(clip.speed));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(178), dp(60));
-            lp.setMarginEnd(dp(6));
-            b.setLayoutParams(lp);
-            b.setAlpha(i == selectedIndex ? 1f : 0.72f);
-            final int index = i;
-            b.setOnClickListener(v -> {
-                selectedIndex = index;
-                renderClipStrip();
-                loadSelectedClip();
-            });
-            clipStrip.addView(b);
-        }
+    private void loadBackground(Uri uri) {
+        try(InputStream in=getContentResolver().openInputStream(uri)) {
+            Bitmap bitmap=BitmapFactory.decodeStream(in); if(bitmap==null) throw new IllegalArgumentException();
+            visualizerView.setBackgroundBitmap(bitmap); refreshReady();
+        } catch(Exception e) { toast("No se pudo abrir la imagen"); }
     }
 
-    private void loadSelectedClip() {
-        ClipModel clip = selectedClip();
-        if (clip == null) {
-            player.stop();
-            player.clearMediaItems();
-            playerView.setVisibility(View.INVISIBLE);
-            emptyHint.setVisibility(View.VISIBLE);
-            selectedClipLabel.setText("Sin clip seleccionado");
-            timeLabel.setText("00:00 / 00:00");
-            return;
-        }
-        emptyHint.setVisibility(View.GONE);
-        playerView.setVisibility(View.VISIBLE);
-        selectedClipLabel.setText(clip.name);
-        trimStartSeek.setProgress(positionToProgress(clip.trimStartMs, clip.durationMs));
-        trimEndSeek.setProgress(positionToProgress(clip.trimEndMs, clip.durationMs));
-        trimStartLabel.setText("Inicio: " + formatTimePrecise(clip.trimStartMs));
-        trimEndLabel.setText("Final: " + formatTimePrecise(clip.trimEndMs));
-        volumeSeek.setProgress(Math.round(clip.volume * 100));
-        rotateBtn.setText((int) clip.rotation + "°");
-        speedSpinner.setSelection(speedIndex(clip.speed));
-        player.setMediaItem(MediaItem.fromUri(clip.uri));
-        player.prepare();
-        player.seekTo(clip.trimStartMs);
-        player.setPlaybackSpeed(clip.speed);
-        player.setVolume(clip.volume);
-        applyPreviewRotation(clip.rotation);
-    }
+    private void refreshReady() { exportBtn.setEnabled(audioUri!=null&&imageUri!=null&&analysis!=null&&transformer==null); }
 
-    private void applyPreviewRotation(float rotation) {
-        playerView.setRotation(rotation);
-        float scale = (rotation == 90f || rotation == 270f) ? 0.72f : 1f;
-        playerView.setScaleX(scale);
-        playerView.setScaleY(scale);
-    }
+    private void exportVideo() {
+        if(audioUri==null||imageUri==null||analysis==null){toast("Selecciona una canción y una imagen primero");return;}
+        final int width=resolutionSpinner.getSelectedItemPosition()==0?1280:720;
+        final int height=resolutionSpinner.getSelectedItemPosition()==0?720:1280;
+        final AudioAnalysis exportAnalysis=analysis; final VisualizerConfig exportConfig=config.copy();
+        player.pause(); playBtn.setEnabled(false); exportBtn.setEnabled(false); workProgress.setVisibility(View.VISIBLE); workProgress.setProgress(0);
+        statusLabel.setText("Preparando video "+width+"×"+height+"…");
 
-    private void seekBy(long deltaMs) {
-        ClipModel clip = selectedClip();
-        if (clip == null) return;
-        long next = Math.max(clip.trimStartMs, Math.min(clip.trimEndMs, player.getCurrentPosition() + deltaMs));
-        player.seekTo(next);
-    }
+        MediaItem imageItem=new MediaItem.Builder().setUri(imageUri).setImageDurationMs(exportAnalysis.durationMs).build();
+        List<Effect> videoEffects=new ArrayList<>();
+        videoEffects.add(Presentation.createForWidthAndHeight(width,height,Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP));
+        videoEffects.add(new MatrixTransformation(){@Override public Matrix getMatrix(long timeUs){float bass=Math.min(1f,exportAnalysis.bassAt(timeUs/1000L)*exportConfig.sensitivity);float s=1f+.055f*exportConfig.zoom*bass;Matrix m=new Matrix();m.postScale(s,s);return m;}});
+        videoEffects.add(new OverlayEffect(Collections.<TextureOverlay>singletonList(new VisualizerOverlay(exportAnalysis,exportConfig))));
+        EditedMediaItem visual=new EditedMediaItem.Builder(imageItem).setFrameRate(30).setEffects(new Effects(Collections.<AudioProcessor>emptyList(),videoEffects)).build();
+        EditedMediaItem audio=new EditedMediaItem.Builder(MediaItem.fromUri(audioUri)).build();
+        EditedMediaItemSequence videoSeq=EditedMediaItemSequence.withVideoFrom(Collections.singletonList(visual));
+        EditedMediaItemSequence audioSeq=EditedMediaItemSequence.withAudioFrom(Collections.singletonList(audio));
+        Composition composition=new Composition.Builder(videoSeq,audioSeq).build();
 
-    private ClipModel selectedClip() {
-        if (selectedIndex < 0 || selectedIndex >= clips.size()) return null;
-        return clips.get(selectedIndex);
-    }
-
-    private boolean containsUri(Uri uri) {
-        for (ClipModel c : clips) if (c.uri.equals(uri)) return true;
-        return false;
-    }
-
-    private void exportProject() {
-        if (clips.isEmpty()) {
-            toast("Agrega al menos un video");
-            return;
-        }
-        exportBtn.setEnabled(false);
-        exportProgress.setVisibility(View.VISIBLE);
-        exportProgress.setProgress(0);
-        setStatus("Preparando exportación…");
-
-        List<EditedMediaItem> editedVideos = new ArrayList<>();
-        for (ClipModel clip : clips) {
-            MediaItem.ClippingConfiguration clipping = new MediaItem.ClippingConfiguration.Builder()
-                    .setStartPositionMs(clip.trimStartMs)
-                    .setEndPositionMs(clip.trimEndMs)
-                    .build();
-            MediaItem mediaItem = new MediaItem.Builder().setUri(clip.uri).setClippingConfiguration(clipping).build();
-
-            List<AudioProcessor> audioProcessors = new ArrayList<>();
-            if (clip.volume < 0.999f) {
-                DefaultGainProvider provider = new DefaultGainProvider.Builder(Math.max(0f, Math.min(1f, clip.volume))).build();
-                audioProcessors.add(new GainProcessor(provider));
-            }
-            List<Effect> videoEffects = new ArrayList<>();
-            if (Math.abs(clip.rotation) > 0.01f) {
-                videoEffects.add(new ScaleAndRotateTransformation.Builder().setRotationDegrees(clip.rotation).build());
-            }
-
-            EditedMediaItem.Builder editedBuilder = new EditedMediaItem.Builder(mediaItem)
-                    .setEffects(new Effects(audioProcessors, videoEffects))
-                    .setFrameRate(30);
-            if (Math.abs(clip.speed - 1f) > 0.001f) {
-                final float speed = clip.speed;
-                editedBuilder.setSpeed(new SpeedProvider() {
-                    @Override public float getSpeed(long timeUs) { return speed; }
-                    @Override public long getNextSpeedChangeTimeUs(long timeUs) { return C.TIME_UNSET; }
-                });
-            }
-            editedVideos.add(editedBuilder.build());
-        }
-
-        EditedMediaItemSequence videoSequence = EditedMediaItemSequence.withAudioAndVideoFrom(editedVideos);
-        Composition composition;
-        if (backgroundAudioUri != null) {
-            EditedMediaItem bgAudio = new EditedMediaItem.Builder(MediaItem.fromUri(backgroundAudioUri)).build();
-            EditedMediaItemSequence audioSequence = EditedMediaItemSequence.withAudioFrom(Collections.singletonList(bgAudio))
-                    .buildUpon().setIsLooping(true).build();
-            composition = new Composition.Builder(videoSequence, audioSequence).build();
-        } else {
-            composition = new Composition.Builder(videoSequence).build();
-        }
-
-        File movies = getExternalFilesDir(Environment.DIRECTORY_MOVIES);
-        if (movies == null) movies = getFilesDir();
-        File exportDir = new File(movies, "ZiiomVideoEditor");
-        if (!exportDir.exists()) exportDir.mkdirs();
-        String stamp = new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date());
-        File output = new File(exportDir, "Ziiom-" + stamp + ".mp4");
-        lastExportedFile = output;
-
-        transformer = new Transformer.Builder(this)
-                .setVideoMimeType(MimeTypes.VIDEO_H264)
-                .setAudioMimeType(MimeTypes.AUDIO_AAC)
-                .addListener(new Transformer.Listener() {
-                    @Override public void onCompleted(@NonNull Composition composition, @NonNull ExportResult exportResult) {
-                        exportBtn.setEnabled(true);
-                        exportProgress.setProgress(100);
-                        setStatus("Exportación completada");
-                        Uri galleryUri = publishToGallery(output);
-                        toast(galleryUri != null ? "Video guardado en la galería" : "Video exportado: " + output.getName());
-                    }
-                    @Override public void onError(@NonNull Composition composition, @NonNull ExportResult exportResult, @NonNull ExportException exportException) {
-                        exportBtn.setEnabled(true);
-                        exportProgress.setVisibility(View.GONE);
-                        setStatus("Error al exportar");
-                        toast("No se pudo exportar: " + exportException.getMessage());
-                    }
+        File movies=getExternalFilesDir(Environment.DIRECTORY_MOVIES); if(movies==null)movies=getFilesDir();
+        File dir=new File(movies,"PulseCanvas"); if(!dir.exists())dir.mkdirs();
+        String stamp=new SimpleDateFormat("yyyyMMdd-HHmmss",Locale.US).format(new Date());
+        File output=new File(dir,"Pulse-Canvas-"+width+"x"+height+"-"+stamp+".mp4");
+        transformer=new Transformer.Builder(this).setVideoMimeType(MimeTypes.VIDEO_H264).setAudioMimeType(MimeTypes.AUDIO_AAC)
+                .addListener(new Transformer.Listener(){
+                    @Override public void onCompleted(@NonNull Composition c,@NonNull ExportResult r){Uri saved=publishToGallery(output);transformer=null;workProgress.setVisibility(View.GONE);playBtn.setEnabled(true);refreshReady();statusLabel.setText("Video terminado · "+width+"×"+height);toast(saved!=null?"Video guardado en la galería":"Video exportado: "+output.getName());}
+                    @Override public void onError(@NonNull Composition c,@NonNull ExportResult r,@NonNull ExportException e){transformer=null;workProgress.setVisibility(View.GONE);playBtn.setEnabled(true);refreshReady();statusLabel.setText("Error al exportar");toast("No se pudo exportar: "+e.getMessage());}
                 }).build();
-
-        transformer.start(composition, output.getAbsolutePath());
-        pollExportProgress();
+        transformer.start(composition,output.getAbsolutePath()); pollProgress();
     }
 
-    private void pollExportProgress() {
-        if (transformer == null) return;
-        ProgressHolder holder = new ProgressHolder();
-        int state = transformer.getProgress(holder);
-        if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
-            exportProgress.setProgress(holder.progress);
-            setStatus("Exportando… " + holder.progress + "%");
-        }
-        if (exportBtn.isEnabled()) return;
-        handler.postDelayed(this::pollExportProgress, 500);
-    }
+    private void pollProgress(){if(transformer==null)return;ProgressHolder h=new ProgressHolder();int state=transformer.getProgress(h);if(state==Transformer.PROGRESS_STATE_AVAILABLE){workProgress.setProgress(h.progress);statusLabel.setText("Renderizando visualizador… "+h.progress+"%");}if(transformer!=null)handler.postDelayed(this::pollProgress,500);}
 
     private Uri publishToGallery(File source) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !source.exists()) return null;
-        try {
-            ContentValues values = new ContentValues();
-            values.put(MediaStore.Video.Media.DISPLAY_NAME, source.getName());
-            values.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4");
-            values.put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/Ziiom Video Editor");
-            values.put(MediaStore.Video.Media.IS_PENDING, 1);
-            ContentResolver resolver = getContentResolver();
-            Uri uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values);
-            if (uri == null) return null;
-            try (InputStream in = new FileInputStream(source); OutputStream out = resolver.openOutputStream(uri)) {
-                if (out == null) return null;
-                byte[] buffer = new byte[1024 * 1024];
-                int n;
-                while ((n = in.read(buffer)) > 0) out.write(buffer, 0, n);
-            }
-            values.clear();
-            values.put(MediaStore.Video.Media.IS_PENDING, 0);
-            resolver.update(uri, values, null, null);
-            return uri;
-        } catch (Exception e) {
-            return null;
-        }
+        if(Build.VERSION.SDK_INT<Build.VERSION_CODES.Q||!source.exists())return null;
+        try{ContentValues v=new ContentValues();v.put(MediaStore.Video.Media.DISPLAY_NAME,source.getName());v.put(MediaStore.Video.Media.MIME_TYPE,"video/mp4");v.put(MediaStore.Video.Media.RELATIVE_PATH,Environment.DIRECTORY_MOVIES+"/Pulse Canvas");v.put(MediaStore.Video.Media.IS_PENDING,1);ContentResolver r=getContentResolver();Uri u=r.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,v);if(u==null)return null;try(InputStream in=new FileInputStream(source);OutputStream out=r.openOutputStream(u)){if(out==null)return null;byte[] b=new byte[1024*1024];int n;while((n=in.read(b))>0)out.write(b,0,n);}v.clear();v.put(MediaStore.Video.Media.IS_PENDING,0);r.update(u,v,null,null);return u;}catch(Exception e){return null;}
     }
 
-    @SuppressWarnings("unused")
-    private void shareLastExport() {
-        if (lastExportedFile == null || !lastExportedFile.exists()) return;
-        Uri contentUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", lastExportedFile);
-        Intent send = new Intent(Intent.ACTION_SEND);
-        send.setType("video/mp4");
-        send.putExtra(Intent.EXTRA_STREAM, contentUri);
-        send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        startActivity(Intent.createChooser(send, "Compartir video"));
-    }
+    private void persistReadPermission(Uri uri){try{getContentResolver().takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(Exception ignored){}}
+    private String queryDisplayName(Uri uri){try(Cursor c=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){if(c!=null&&c.moveToFirst()){int i=c.getColumnIndex(OpenableColumns.DISPLAY_NAME);if(i>=0)return c.getString(i);}}catch(Exception ignored){}return "Archivo";}
+    private String formatTime(long ms){long t=Math.max(0,ms)/1000;return String.format(Locale.US,"%02d:%02d",t/60,t%60);}
+    private LinearLayout vertical(){LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.VERTICAL);return l;}
+    private LinearLayout horizontal(){LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.HORIZONTAL);return l;}
+    private TextView text(String s,int sp,int color,boolean bold){TextView v=new TextView(this);v.setText(s);v.setTextSize(sp);v.setTextColor(color);if(bold)v.setTypeface(v.getTypeface(),android.graphics.Typeface.BOLD);return v;}
+    private Button button(String s){Button b=new Button(this);b.setText(s);b.setAllCaps(false);return b;}
+    private LinearLayout.LayoutParams weightLp(){return new LinearLayout.LayoutParams(0,dp(50),1f);}
+    private LinearLayout.LayoutParams lp(int w,int h,int l,int t,int r,int b){LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(w,h);p.setMargins(dp(l),dp(t),dp(r),dp(b));return p;}
+    private int dp(int n){return Math.round(n*getResources().getDisplayMetrics().density);}
+    private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
 
-    private void persistReadPermission(Uri uri) {
-        try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); }
-        catch (Exception ignored) {}
-    }
-
-    private String queryDisplayName(Uri uri) {
-        try (Cursor cursor = getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
-            if (cursor != null && cursor.moveToFirst()) {
-                int index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
-                if (index >= 0) return cursor.getString(index);
-            }
-        } catch (Exception ignored) {}
-        return "Video";
-    }
-
-    private long queryDuration(Uri uri) {
-        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
-        try {
-            retriever.setDataSource(this, uri);
-            String value = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
-            if (value != null) return Math.max(1, Long.parseLong(value));
-        } catch (Exception ignored) {
-        } finally {
-            try { retriever.release(); } catch (Exception ignored) {}
-        }
-        return 1000;
-    }
-
-    private int positionToProgress(long position, long duration) {
-        if (duration <= 0) return 0;
-        return (int) Math.max(0, Math.min(1000, Math.round(position * 1000.0 / duration)));
-    }
-    private long progressToPosition(int progress, long duration) { return Math.round((progress / 1000.0) * duration); }
-
-    private int speedIndex(float speed) {
-        float[] values = {0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f};
-        int best = 2;
-        float diff = Float.MAX_VALUE;
-        for (int i = 0; i < values.length; i++) {
-            float d = Math.abs(values[i] - speed);
-            if (d < diff) { diff = d; best = i; }
-        }
-        return best;
-    }
-
-    private float parseSpeed(String s) { return Float.parseFloat(s.replace("x", "")); }
-    private String formatSpeed(float speed) {
-        if (Math.abs(speed - Math.round(speed)) < 0.001f) return Math.round(speed) + "x";
-        return String.format(Locale.US, "%.2gx", speed);
-    }
-    private String shortName(String name) {
-        if (name == null) return "Video";
-        return name.length() > 20 ? name.substring(0, 18) + "…" : name;
-    }
-    private String formatTime(long ms) {
-        long total = Math.max(0, ms) / 1000;
-        return String.format(Locale.US, "%02d:%02d", total / 60, total % 60);
-    }
-    private String formatTimePrecise(long ms) {
-        long totalSeconds = Math.max(0, ms) / 1000;
-        long hundredths = (Math.max(0, ms) % 1000) / 10;
-        return String.format(Locale.US, "%02d:%02d.%02d", totalSeconds / 60, totalSeconds % 60, hundredths);
-    }
-    private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
-    private void setStatus(String text) { statusLabel.setText(text); }
-    private void toast(String text) { Toast.makeText(this, text, Toast.LENGTH_LONG).show(); }
-
-    @Override
-    protected void onDestroy() {
-        handler.removeCallbacksAndMessages(null);
-        if (transformer != null && !exportBtn.isEnabled()) transformer.cancel();
-        if (player != null) player.release();
-        super.onDestroy();
-    }
+    @Override protected void onDestroy(){handler.removeCallbacksAndMessages(null);if(transformer!=null)transformer.cancel();if(player!=null)player.release();executor.shutdownNow();super.onDestroy();}
 }

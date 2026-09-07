@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Pulse Canvas Android APK
 
 on:
   workflow_dispatch:
@@ -39,12 +39,12 @@ jobs:
         run: gradle :app:assembleDebug --stacktrace
 
       - name: Rename APK
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk "Ziiom-Video-Editor-Android-v0.1.apk"
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk "Pulse-Canvas-Visualizer-v1.0.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Ziiom-Video-Editor-Android-APK
-          path: Ziiom-Video-Editor-Android-v0.1.apk
+          name: Pulse-Canvas-Visualizer-APK
+          path: Pulse-Canvas-Visualizer-v1.0.apk
           if-no-files-found: error
           retention-days: 90
