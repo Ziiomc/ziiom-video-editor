@@ -903,3 +903,27 @@ renderTimeline();
 renderTexts();
 syncInspector();
 loadPreview();
+
+
+/** Import a generated Cosmos clip into the existing media bin and timeline. */
+window.ziiomAddGeneratedVideo = entry => {
+  if (!entry || typeof entry.path !== 'string' || !entry.path.toLowerCase().endsWith('.mp4')) {
+    toast('No se encontró un MP4 válido para importar.');
+    return;
+  }
+  let media = state.media.find(item => item.path === entry.path);
+  if (!media) {
+    media = {
+      id: uid(),
+      path: entry.path,
+      name: entry.name || entry.path.split(/[\\/]/).pop() || 'cosmos.mp4',
+      ext: '.mp4',
+      kind: 'video'
+    };
+    state.media.push(media);
+    renderMedia();
+  }
+  addClip(media);
+  markDirty();
+  toast('Escena Cosmos añadida a la línea de tiempo.');
+};

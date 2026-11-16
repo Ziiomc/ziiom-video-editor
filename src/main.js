@@ -3,6 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
+const { registerCosmosIpc } = require('./cosmos-ipc');
+registerCosmosIpc();
 
 function createWindow() {
   const win = new BrowserWindow({

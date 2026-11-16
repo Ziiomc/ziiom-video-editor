@@ -6,12 +6,17 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' file: data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob:; media-src 'self' file: data: blob:;" />
   <title>Ziiom Video Editor</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="cosmos-studio.css" />
 </head>
-<body>
+<body class="studio-mode">
   <div id="app">
     <header class="topbar">
-      <div class="brand"><span class="brand-mark">Z</span><div><strong>Ziiom Video Editor</strong><small id="projectStatus">Proyecto sin guardar</small></div></div>
-      <div class="top-actions">
+      <div class="brand"><span class="brand-mark">Z</span><div><strong>Ziiom Video Studio</strong><small id="projectStatus">Proyecto sin guardar</small></div></div>
+      <nav class="mode-switch" aria-label="Área de trabajo">
+        <button type="button" class="mode-switch-button active" id="openStudioView" aria-pressed="true">✦ Escenas IA</button>
+        <button type="button" class="mode-switch-button" id="openEditorView" aria-pressed="false">Editor de video</button>
+      </nav>
+      <div class="top-actions" id="editorActions">
         <button id="openProjectBtn" class="ghost">Abrir</button>
         <button id="saveProjectBtn" class="ghost">Guardar</button>
         <button id="undoBtn" class="icon-btn" title="Deshacer (Ctrl+Z)">↶</button>
@@ -19,6 +24,134 @@
         <button id="exportBtn" class="primary">Exportar proyecto</button>
       </div>
     </header>
+
+
+    <section id="cosmosStudio" class="cosmos-studio" aria-label="Generador de escenas Cosmos">
+      <header class="cosmos-heading">
+        <div><div class="cosmos-eyebrow">ESTUDIO DE GENERACIÓN · NVIDIA COSMOS3 NANO</div>
+          <h1>Convierte tus ideas en escenas.</h1>
+          <p>Imagina, genera, previsualiza y lleva cada toma a la línea de tiempo. GPU remota de NVIDIA cuando tu API tenga acceso.</p>
+        </div>
+        <button id="cosmosOpenBuildTop" class="cosmos-outline" type="button">Abrir NVIDIA Build ↗</button>
+      </header>
+
+      <div class="cosmos-layout">
+        <section class="cosmos-panel cosmos-creator" aria-label="Configuración de escena">
+          <div class="cosmos-panel-head"><div><small>01 / CREACIÓN</small><h2>Configurar escena</h2></div><span class="cosmos-chip">COSMOS NANO</span></div>
+          <div class="cosmos-form">
+            <label class="cosmos-label">Tipo de generación</label>
+            <div class="cosmos-modes" role="group" aria-label="Modo de generación">
+              <button type="button" data-cosmos-mode="text2video" class="selected">Texto → video</button>
+              <button type="button" data-cosmos-mode="image2video">Imagen → video</button>
+            </div>
+            <div id="cosmosImageWrap" class="cosmos-image-wrap hidden">
+              <div class="cosmos-image-upload" id="cosmosImageUpload">
+                <img id="cosmosReferencePreview" class="hidden" alt="Referencia seleccionada" />
+                <div id="cosmosImagePlaceholder"><strong>＋ Cargar imagen de referencia</strong><span>JPG, PNG o WebP · hasta 12 MB</span></div>
+              </div>
+              <div class="cosmos-file-actions"><span id="cosmosImageName">Sin imagen</span><button type="button" id="cosmosClearImage" class="cosmos-link">Quitar</button></div>
+            </div>
+
+            <div class="cosmos-label-line"><label for="cosmosPrompt" class="cosmos-label">Prompt cinematográfico</label><button type="button" id="cosmosPromptSample" class="cosmos-link">Usar ejemplo</button></div>
+            <textarea id="cosmosPrompt" maxlength="4000" rows="6" spellcheck="true" placeholder="Describe sujetos, acciones, movimientos de cámara, luz y atmósfera..."></textarea>
+            <div class="cosmos-hint-row"><span>Escribe en español o inglés. Evita cambios imposibles en una sola toma.</span><span id="cosmosPromptCount">0/4000</span></div>
+
+            <div class="cosmos-duo">
+              <label>Formato
+                <select id="cosmosAspect">
+                  <option value="16_9">16:9 · Horizontal</option>
+                  <option value="9_16">9:16 · Vertical</option>
+                  <option value="1_1">1:1 · Cuadrado</option>
+                  <option value="4_3">4:3 · Clásico</option>
+                  <option value="3_4">3:4 · Retrato</option>
+                </select>
+              </label>
+              <label>Resolución
+                <select id="cosmosTier">
+                  <option value="480" selected>480p · Recomendado</option>
+                  <option value="720">720p · Mayor detalle</option>
+                  <option value="256">256p · Pruebas</option>
+                </select>
+              </label>
+              <label>Duración
+                <select id="cosmosSeconds">
+                  <option value="1">1 segundo</option><option value="2">2 segundos</option>
+                  <option value="3" selected>3 segundos</option><option value="4">4 segundos</option>
+                  <option value="5">5 segundos</option><option value="6">6 segundos</option>
+                  <option value="7">7 segundos</option><option value="8">8 segundos</option>
+                </select>
+              </label>
+              <label>Velocidad
+                <select id="cosmosFps" disabled><option value="24">24 FPS · Cine</option></select>
+              </label>
+            </div>
+
+            <details class="cosmos-advanced">
+              <summary>Parámetros avanzados <span>Semilla y pasos</span></summary>
+              <div class="cosmos-duo">
+                <label>Semilla
+                  <input id="cosmosSeed" type="number" min="0" max="2147483647" placeholder="Aleatoria" />
+                </label>
+                <label>Pasos de inferencia
+                  <select id="cosmosSteps"><option value="25">25 · Rápido</option><option value="35" selected>35 · Equilibrado</option><option value="50">50 · Detallado</option></select>
+                </label>
+              </div>
+            </details>
+
+            <button id="cosmosGenerate" type="button" class="cosmos-generate">✦ Generar escena <span>→</span></button>
+            <button id="cosmosCancel" type="button" class="cosmos-outline hidden">Cancelar espera</button>
+            <p class="cosmos-disclaimer">Las generaciones usan la cuota de tu cuenta NVIDIA. La API pública puede responder 404 aunque el Playground funcione.</p>
+          </div>
+        </section>
+
+        <section class="cosmos-panel cosmos-output" aria-label="Vista previa de escena">
+          <div class="cosmos-panel-head"><div><small>02 / RESULTADO</small><h2>Monitor de escena</h2></div><span id="cosmosVideoBadge" class="cosmos-chip">SIN GENERAR</span></div>
+          <div class="cosmos-monitor">
+            <video id="cosmosVideo" controls playsinline preload="metadata" class="hidden"></video>
+            <div id="cosmosEmpty" class="cosmos-empty">
+              <div class="cosmos-empty-symbol">✧</div>
+              <h3>Tu próxima escena empieza aquí</h3>
+              <p>Escribe el prompt, configura el formato y genera un clip cinematográfico.</p>
+              <span class="cosmos-screen-grid"></span>
+            </div>
+          </div>
+          <div id="cosmosProgress" class="cosmos-progress" aria-live="polite">
+            <div class="cosmos-progress-dot"></div><span id="cosmosProgressText">Preparado para una nueva escena</span>
+          </div>
+          <div class="cosmos-preview-actions">
+            <button type="button" class="cosmos-primary-soft" id="cosmosAddToEditor" disabled>＋ Añadir al editor</button>
+            <button type="button" class="cosmos-outline" id="cosmosOpenFolder">Abrir carpeta MP4</button>
+          </div>
+          <div class="cosmos-facts">
+            <div><span>PROVEEDOR</span><strong>NVIDIA Cloud</strong></div>
+            <div><span>MODELO</span><strong>Cosmos3 Nano</strong></div>
+            <div><span>SALIDA</span><strong>MP4 · 24 FPS</strong></div>
+          </div>
+        </section>
+
+        <aside class="cosmos-side" aria-label="Conexión y biblioteca">
+          <section class="cosmos-panel cosmos-connect">
+            <div class="cosmos-panel-head"><div><small>03 / CONEXIÓN</small><h2>Motor NVIDIA</h2></div><span id="cosmosKeyBadge" class="cosmos-chip">SIN CLAVE</span></div>
+            <label class="cosmos-label" for="cosmosKey">API Key de NVIDIA</label>
+            <div class="cosmos-key-group">
+              <input type="password" id="cosmosKey" autocomplete="off" spellcheck="false" placeholder="nvapi-..." />
+              <button type="button" id="cosmosSaveKey" class="cosmos-primary-soft">Conectar</button>
+            </div>
+            <div class="cosmos-connect-actions">
+              <button type="button" id="cosmosTest" class="cosmos-outline">Comprobar ruta API</button>
+              <button type="button" id="cosmosForgetKey" class="cosmos-link">Olvidar clave</button>
+            </div>
+            <p class="cosmos-security">Clave solo en memoria durante la sesión. Nunca se escribe en el proyecto, en GitHub ni en el historial de escenas.</p>
+            <div class="cosmos-connect-result" id="cosmosConnectionResult" role="status">El editor está listo. Conecta tu clave para comprobar el acceso.</div>
+          </section>
+          <section class="cosmos-panel cosmos-library-panel">
+            <div class="cosmos-panel-head"><div><small>04 / BIBLIOTECA</small><h2>Escenas generadas</h2></div><button id="cosmosRefreshLibrary" class="cosmos-icon-btn" type="button" title="Actualizar">↻</button></div>
+            <div id="cosmosLibrary" class="cosmos-library"><p class="cosmos-muted">Todavía no hay escenas generadas en este equipo.</p></div>
+            <p class="cosmos-library-note">Los resultados se guardan automáticamente en Videos / Ziiom Cosmos Studio.</p>
+          </section>
+        </aside>
+      </div>
+    </section>
 
     <main class="workspace">
       <aside class="sidebar">
@@ -112,5 +245,6 @@
 
   <div id="toast" class="toast"></div>
   <script src="renderer.js"></script>
+  <script src="cosmos-studio.js"></script>
 </body>
 </html>
